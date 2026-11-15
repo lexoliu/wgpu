@@ -348,7 +348,7 @@ pub struct DropGuard {
     callback: Option<DropCallback>,
 }
 
-#[cfg(all(any(gles, vulkan, metal), any(native, Emscripten)))]
+#[cfg(all(any(gles, vulkan, metal), any(native, Emscripten, target_os = "wasi")))]
 impl DropGuard {
     fn from_option(callback: Option<DropCallback>) -> Option<Self> {
         callback.map(Self::new)

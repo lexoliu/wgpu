@@ -22,7 +22,7 @@ fn main() {
             )
         ) },
         metal: { all(target_vendor = "apple", feature = "metal") },
-        vulkan: { all(not(target_family = "wasm"), feature = "vulkan") },
+        vulkan: { all(any(not(target_family = "wasm"), target_os = "wasi"), feature = "vulkan") },
         drm: { all(
             feature = "drm",
             any(target_os = "linux", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd")

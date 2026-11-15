@@ -17,6 +17,9 @@ rust-version = "1.76"
 
 [features]
 webgl = ["wgpu-hal/gles"]
+# Only takes effect on WASI (see wgpu-hal's `vulkan` cfg alias); callers
+# provide the Vulkan entry points through `wgpu_hal::vulkan::Instance::init_from_entry`.
+vulkan = ["wgpu-hal/vulkan"]
 
 # Depend on wgpu-hal conditionally, so that the above features only apply to wgpu-hal on this set of platforms.
 [target.'cfg(all(target_family = "wasm", not(target_os = "emscripten")))'.dependencies]

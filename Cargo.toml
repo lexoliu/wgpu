@@ -276,7 +276,7 @@ raw-window-metal = "1.0"
 
 # Vulkan dependencies
 android_system_properties = "0.1.1"
-ash = "0.38"
+ash = { version = "0.38", default-features = false, features = ["debug", "std"] }
 
 # DX12 dependencies
 range-alloc = "0.1"
