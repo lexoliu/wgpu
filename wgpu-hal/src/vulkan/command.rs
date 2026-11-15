@@ -1001,7 +1001,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
 
     unsafe fn set_index_buffer<'a>(
         &mut self,
-        binding: crate::BufferBinding<'a, super::Buffer>,
+        binding: crate::BufferBinding<'a, super::Buffer, wgt::BufferAddress>,
         format: wgt::IndexFormat,
     ) {
         unsafe {
@@ -1016,7 +1016,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
     unsafe fn set_vertex_buffer<'a>(
         &mut self,
         index: u32,
-        binding: crate::BufferBinding<'a, super::Buffer>,
+        binding: crate::BufferBinding<'a, super::Buffer, wgt::BufferAddress>,
     ) {
         let vk_buffers = [binding.buffer.raw];
         let vk_offsets = [binding.offset];
