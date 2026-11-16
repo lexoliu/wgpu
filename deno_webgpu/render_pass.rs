@@ -2,7 +2,6 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use deno_core::cppgc::Ptr;
@@ -315,7 +314,7 @@ impl GPURenderPassEncoder {
         buffer.wgpu_buffer.clone(),
         index_format.into(),
         offset,
-        size.and_then(NonZeroU64::new),
+        size,
       )
       .err();
     self.error_handler.push_error(err);
@@ -339,7 +338,7 @@ impl GPURenderPassEncoder {
           .into_option()
           .map(|buffer| buffer.wgpu_buffer.clone()),
         offset,
-        size.and_then(NonZeroU64::new),
+        size,
       )
       .err();
     self.error_handler.push_error(err);

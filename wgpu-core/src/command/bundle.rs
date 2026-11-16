@@ -84,17 +84,11 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::{
-    convert::Infallible,
-    mem,
-    num::{NonZeroU32, NonZeroU64},
-    ops::Range,
-};
+use core::{convert::Infallible, mem, num::NonZeroU32, ops::Range};
 
 use arrayvec::ArrayVec;
 use thiserror::Error;
 
-use wgpu_hal::ShouldBeNonZeroExt;
 use wgt::error::{ErrorType, WebGpuError};
 
 use crate::{
@@ -577,7 +571,7 @@ impl RenderBundleEncoder {
         buffer: Arc<Buffer>,
         index_format: wgt::IndexFormat,
         offset: wgt::BufferAddress,
-        size: Option<wgt::BufferSize>,
+        size: Option<wgt::BufferAddress>,
     ) -> Result<(), PassStateError> {
         pass_base!(self, PassErrorScope::SetIndexBuffer);
         self.base.commands.push(RenderCommand::SetIndexBuffer {
@@ -632,7 +626,7 @@ impl RenderBundleEncoder {
         slot: u32,
         buffer: Option<Arc<Buffer>>,
         offset: wgt::BufferAddress,
-        size: Option<wgt::BufferSize>,
+        size: Option<wgt::BufferAddress>,
     ) -> Result<(), PassStateError> {
         pass_base!(self, PassErrorScope::SetVertexBuffer);
         self.base.commands.push(RenderCommand::SetVertexBuffer {
@@ -865,7 +859,7 @@ fn set_index_buffer(
     buffer: Arc<Buffer>,
     index_format: wgt::IndexFormat,
     offset: u64,
-    size: Option<NonZeroU64>,
+    size: Option<wgt::BufferAddress>,
 ) -> Result<(), RenderBundleErrorInner> {
     buffer.check_is_valid()?;
 
@@ -884,16 +878,16 @@ fn set_index_buffer(
         }
         .into());
     }
-    let end = offset + buffer.resolve_binding_size(offset, size)?;
+    let range = buffer.resolve_vertex_or_index_binding_range(offset, size)?;
 
     state
         .buffer_memory_init_actions
         .extend(buffer.initialization_status.read().create_action(
             &buffer,
-            offset..end.get(),
+            range.clone(),
             MemoryInitKind::NeedsInitializedMemory,
         ));
-    state.set_index_buffer(buffer, index_format, offset..end.get());
+    state.set_index_buffer(buffer, index_format, range);
     Ok(())
 }
 
@@ -903,7 +897,7 @@ fn set_vertex_buffer(
     slot: u32,
     buffer: Option<Arc<Buffer>>,
     offset: u64,
-    size: Option<NonZeroU64>,
+    size: Option<wgt::BufferAddress>,
 ) -> Result<(), RenderBundleErrorInner> {
     let max_vertex_buffers = state.device.limits.max_vertex_buffers;
     if slot >= max_vertex_buffers {
@@ -928,17 +922,16 @@ fn set_vertex_buffer(
         if !offset.is_multiple_of(wgt::VERTEX_ALIGNMENT) {
             return Err(RenderCommandError::UnalignedVertexBuffer { slot, offset }.into());
         }
-        let binding_size = buffer.resolve_binding_size(offset, size)?;
-        let buffer_range = offset..(offset + binding_size);
+        let range = buffer.resolve_vertex_or_index_binding_range(offset, size)?;
 
         state
             .buffer_memory_init_actions
             .extend(buffer.initialization_status.read().create_action(
                 &buffer,
-                buffer_range.clone(),
+                range.clone(),
                 MemoryInitKind::NeedsInitializedMemory,
             ));
-        state.vertex.set_buffer(slot as usize, buffer, buffer_range);
+        state.vertex.set_buffer(slot as usize, buffer, range);
         if let Some(pipeline) = state.pipeline.as_deref() {
             state.vertex.update_limits(&pipeline.vertex_steps);
         }
@@ -952,14 +945,17 @@ fn set_vertex_buffer(
             )
             .into());
         }
-        if let Some(size) = size {
-            return Err(RenderCommandError::from(
-                crate::binding_model::BindingError::UnbindingVertexBufferSizeNotZero {
-                    slot,
-                    size: size.get(),
-                },
-            )
-            .into());
+        match size {
+            Some(size) if size != 0 => {
+                return Err(RenderCommandError::from(
+                    crate::binding_model::BindingError::UnbindingVertexBufferSizeNotZero {
+                        slot,
+                        size,
+                    },
+                )
+                .into());
+            }
+            _ => {}
         }
 
         state.vertex.clear_buffer(slot as usize);
@@ -1395,7 +1391,13 @@ impl RenderBundle {
                     let buffer = buffer.try_raw(snatch_guard)?;
                     // SAFETY: The binding size was checked against the buffer size
                     // in `set_index_buffer` and again in `IndexState::flush`.
-                    let bb = hal::BufferBinding::new_unchecked(buffer, *offset, *size);
+                    let bb = hal::BufferBinding::new_unchecked(
+                        buffer,
+                        *offset,
+                        size.expect(
+                            "Index buffer binding size should already be resolved when executing bundle",
+                        ),
+                    );
                     unsafe { raw.set_index_buffer(bb, *index_format) };
                 }
                 Cmd::SetVertexBuffer {
@@ -1407,7 +1409,13 @@ impl RenderBundle {
                     let buffer = buffer.as_ref().unwrap().try_raw(snatch_guard)?;
                     // SAFETY: The binding size was checked against the buffer size
                     // in `set_vertex_buffer` and again in `VertexState::flush`.
-                    let bb = hal::BufferBinding::new_unchecked(buffer, *offset, *size);
+                    let bb = hal::BufferBinding::new_unchecked(
+                        buffer,
+                        *offset,
+                        size.expect(
+                            "Vertex buffer binding size should already be resolved when executing bundle",
+                        ),
+                    );
                     unsafe { raw.set_vertex_buffer(*slot, bb) };
                 }
                 Cmd::SetImmediate { offset, data } => {
@@ -1574,7 +1582,7 @@ impl IndexState {
                 buffer: self.buffer.clone(),
                 index_format: self.format,
                 offset: self.range.start,
-                size: NonZeroU64::new(binding_size),
+                size: Some(binding_size),
             })
         } else {
             None
@@ -1688,7 +1696,7 @@ impl State {
                 slot,
                 buffer: Some(buffer.clone()),
                 offset,
-                size,
+                size: Some(size),
             });
         });
     }
@@ -1897,7 +1905,7 @@ impl crate::global::Global {
         slot: u32,
         buffer_id: Option<id::BufferId>,
         offset: wgt::BufferAddress,
-        size: Option<wgt::BufferSize>,
+        size: Option<wgt::BufferAddress>,
     ) -> Result<(), PassStateError> {
         bundle.set_vertex_buffer(
             slot,
@@ -1913,7 +1921,7 @@ impl crate::global::Global {
         slot: u32,
         buffer_id: Option<id::BufferId>,
         offset: wgt::BufferAddress,
-        size: Option<wgt::BufferSize>,
+        size: Option<wgt::BufferAddress>,
     ) -> Result<(), PassStateError> {
         let bundle_encoder = self.hub.render_bundle_encoders.get(bundle_encoder);
 
@@ -1935,7 +1943,7 @@ impl crate::global::Global {
         buffer: id::BufferId,
         index_format: wgt::IndexFormat,
         offset: wgt::BufferAddress,
-        size: Option<wgt::BufferSize>,
+        size: Option<wgt::BufferAddress>,
     ) -> Result<(), PassStateError> {
         encoder.set_index_buffer(self.hub.buffers.get(buffer), index_format, offset, size)
     }
@@ -1946,7 +1954,7 @@ impl crate::global::Global {
         buffer: id::BufferId,
         index_format: wgt::IndexFormat,
         offset: wgt::BufferAddress,
-        size: Option<wgt::BufferSize>,
+        size: Option<wgt::BufferAddress>,
     ) -> Result<(), PassStateError> {
         let bundle_encoder = self.hub.render_bundle_encoders.get(bundle_encoder);
 

@@ -261,6 +261,17 @@ smallvec = { workspace = true, optional = true }
 # Needed for the webgpu backend. Optional as webgpu is optional on WebAssembly.
 wasm-bindgen-futures = { workspace = true, optional = true }
 
+########
+# WASI #
+########
+# The Vulkan backend on WASI takes host-provided entry points, so wgpu-core is
+# always present here, as on native platforms.
+[target.'cfg(target_os = "wasi")'.dependencies]
+wgpu-core = { workspace = true, default-features = true, features = ["wgsl", "portable-atomic"] }
+wgpu-hal = { workspace = true, default-features = true, features = ["portable-atomic"] }
+
+smallvec.workspace = true
+
 ##############
 # Emscripten #
 ##############

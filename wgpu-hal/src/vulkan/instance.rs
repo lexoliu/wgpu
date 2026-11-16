@@ -772,21 +772,63 @@ impl super::Instance {
         desc: &crate::InstanceDescriptor<'_>,
         callback: Option<Box<super::CreateInstanceCallback>>,
     ) -> Result<Self, crate::InstanceError> {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let entry = unsafe {
+                profiling::scope!("Load vk library");
+                // ohos support is already fixed on ash main, but it's unclear when
+                // a new release can happen.
+                #[cfg(target_env = "ohos")]
+                let loaded = ash::Entry::load_from("libvulkan.so");
+                #[cfg(not(target_env = "ohos"))]
+                let loaded = ash::Entry::load();
+                loaded
+            }
+            .map_err(|err| {
+                crate::InstanceError::with_source(String::from("missing Vulkan entry points"), err)
+            })?;
+            unsafe { Self::init_from_entry_with_callback(entry, desc, callback) }
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (desc, callback);
+            Err(crate::InstanceError::new(String::from(
+                "this target cannot load a Vulkan library; \
+                 construct the instance with `Instance::init_from_entry`",
+            )))
+        }
+    }
+
+    /// Create an instance from caller-provided Vulkan entry points.
+    ///
+    /// This is the only way to create a Vulkan instance on targets that cannot
+    /// load a Vulkan library dynamically (such as WASI), where the host
+    /// supplies the entry points, for example through
+    /// [`ash::Entry::from_static_fn`].
+    ///
+    /// # Safety
+    ///
+    /// Same as [`crate::Instance::init`], and `entry` must hold valid Vulkan
+    /// entry points that remain valid for the lifetime of the instance.
+    pub unsafe fn init_from_entry(
+        entry: ash::Entry,
+        desc: &crate::InstanceDescriptor<'_>,
+    ) -> Result<Self, crate::InstanceError> {
+        unsafe { Self::init_from_entry_with_callback(entry, desc, None) }
+    }
+
+    /// [`Self::init_from_entry`] with the callback of [`Self::init_with_callback`].
+    ///
+    /// # Safety
+    ///
+    /// Same as [`Self::init_with_callback`] and [`Self::init_from_entry`].
+    pub unsafe fn init_from_entry_with_callback(
+        entry: ash::Entry,
+        desc: &crate::InstanceDescriptor<'_>,
+        callback: Option<Box<super::CreateInstanceCallback>>,
+    ) -> Result<Self, crate::InstanceError> {
         profiling::scope!("Init Vulkan Backend");
 
-        let entry = unsafe {
-            profiling::scope!("Load vk library");
-            // ohos support is already fixed on ash main, but it's unclear when
-            // a new release can happen.
-            #[cfg(target_env = "ohos")]
-            let loaded = ash::Entry::load_from("libvulkan.so");
-            #[cfg(not(target_env = "ohos"))]
-            let loaded = ash::Entry::load();
-            loaded
-        }
-        .map_err(|err| {
-            crate::InstanceError::with_source(String::from("missing Vulkan entry points"), err)
-        })?;
         let version = {
             profiling::scope!("vkEnumerateInstanceVersion");
             unsafe { entry.try_enumerate_instance_version() }
@@ -1250,5 +1292,59 @@ impl crate::Surface for super::Surface {
                 .discard_texture(texture)
                 .unwrap()
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::ffi::{c_char, CStr};
+
+    use ash::vk;
+
+    #[test]
+    fn supplied_entry_preserves_version_query_error() {
+        unsafe extern "system" fn enumerate_version(_version: *mut u32) -> vk::Result {
+            vk::Result::ERROR_INITIALIZATION_FAILED
+        }
+
+        unsafe extern "system" fn get_proc_addr(
+            _instance: vk::Instance,
+            name: *const c_char,
+        ) -> vk::PFN_vkVoidFunction {
+            if unsafe { CStr::from_ptr(name) } == c"vkEnumerateInstanceVersion" {
+                Some(unsafe {
+                    core::mem::transmute::<
+                        vk::PFN_vkEnumerateInstanceVersion,
+                        unsafe extern "system" fn(),
+                    >(enumerate_version)
+                })
+            } else {
+                None
+            }
+        }
+
+        let entry = unsafe {
+            ash::Entry::from_static_fn(ash::StaticFn {
+                get_instance_proc_addr: get_proc_addr,
+            })
+        };
+        let descriptor = crate::InstanceDescriptor {
+            name: "supplied-entry-test",
+            flags: wgt::InstanceFlags::empty(),
+            memory_budget_thresholds: Default::default(),
+            backend_options: Default::default(),
+            telemetry: None,
+            display: None,
+        };
+        let error = unsafe { super::super::Instance::init_from_entry(entry, &descriptor) }
+            .expect_err("the supplied version query must fail");
+        assert_eq!(
+            error
+                .source
+                .as_deref()
+                .unwrap()
+                .downcast_ref::<vk::Result>(),
+            Some(&vk::Result::ERROR_INITIALIZATION_FAILED),
+        );
     }
 }

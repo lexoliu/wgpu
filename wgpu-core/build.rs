@@ -18,6 +18,7 @@ fn main() {
         ) },
         vulkan: { any(
             all(windows_linux_android, feature = "vulkan"), // Regular Vulkan
+            all(target_os = "wasi", feature = "vulkan"), // Vulkan with host-provided entry points
             all(target_vendor = "apple", feature = "vulkan-portability") // Vulkan Portability on Apple
         ) },
         drm: { all(

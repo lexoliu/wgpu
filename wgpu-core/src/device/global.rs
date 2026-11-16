@@ -389,6 +389,31 @@ impl Global {
         hub.textures.remove(texture_id);
     }
 
+    /// Creates a child of `parent_id` under `id_in`; see
+    /// [`resource::Texture::create_child_texture`]. A descriptor the parent
+    /// cannot serve registers an invalid texture under the id.
+    pub fn texture_create_child(
+        &self,
+        parent_id: id::TextureId,
+        desc: &resource::TextureDescriptor,
+        id_in: Option<id::TextureId>,
+    ) -> (id::TextureId, Option<resource::CreateChildTextureError>) {
+        let hub = &self.hub;
+
+        let fid = hub.textures.prepare(id_in);
+
+        let parent = hub.textures.get(parent_id);
+
+        let (texture, error) = match parent.create_child_texture(desc) {
+            Ok(child) => (child, None),
+            Err(error) => (parent.device.create_texture_error(desc), Some(error)),
+        };
+
+        let id = fid.assign(texture);
+
+        (id, error)
+    }
+
     pub fn texture_create_view(
         &self,
         texture_id: id::TextureId,

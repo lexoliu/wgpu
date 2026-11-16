@@ -136,6 +136,7 @@ metal = ["wgpu-core-deps-apple/metal"]
 vulkan = [
     "wgpu-core-deps-linux-android-bsd/vulkan",
     "wgpu-core-deps-windows/vulkan",
+    "wgpu-core-deps-wasm/vulkan",
 ]
 ## OpenGL backend, only available on Windows, Linux, Android, and Emscripten
 gles = [
