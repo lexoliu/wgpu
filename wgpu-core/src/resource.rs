@@ -2874,6 +2874,15 @@ impl From<InvalidOrDestroyedResourceError> for CreateTextureViewError {
     }
 }
 
+impl WebGpuError for CreateChildTextureError {
+    fn webgpu_error_type(&self) -> ErrorType {
+        match self {
+            Self::TextureDescriptorMustBeSubset { .. }
+            | Self::TextureDescriptorMustBeEqual { .. } => ErrorType::Validation,
+        }
+    }
+}
+
 impl WebGpuError for CreateTextureViewError {
     fn webgpu_error_type(&self) -> ErrorType {
         match self {
