@@ -17,6 +17,8 @@ fn main() {
         vulkan: { any(
             // The `vulkan` feature enables the Vulkan backend only on "native Vulkan" platforms, i.e. Windows/Linux/Android
             all(any(windows, target_os = "linux", target_os = "android", target_os = "freebsd"), feature = "vulkan"),
+            // On WASI the caller provides the Vulkan entry points
+            all(target_os = "wasi", feature = "vulkan"),
             // On Apple platforms, however, we require the `vulkan-portability` feature
             // to explicitly opt-in to Vulkan since it's meant to be used with MoltenVK.
             all(target_vendor = "apple", feature = "vulkan-portability")
